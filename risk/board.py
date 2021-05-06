@@ -1,7 +1,8 @@
 import os
 import random
-from collections import namedtuple
-
+from collections import namedtuple, deque
+import heapdict
+import copy
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from matplotlib.path import Path
@@ -111,7 +112,17 @@ class Board(object):
         Returns:
             bool: True if the input path is valid
         '''
-
+        if not path:
+            return True
+        visited = []
+        for i in range(len(path) - 1):
+            neighbors = risk.definitions.territory_neighbors[path[i]]
+            visited.append(path[i])
+            if path[i+1] not in neighbors:
+                return False
+            if path[i+1] in visited:
+                return False 
+        return True
     
     def is_valid_attack_path(self, path):
         '''
@@ -130,8 +141,20 @@ class Board(object):
         Returns:
             bool: True if the path is an attack path
         '''
-
-
+        if self.is_valid_path(path) and path is not None: 
+            if len(path) < 2:
+                return False
+            else:
+                attacker = self.owner(path[0])
+                for territory in path[1:]: 
+                    ter_owner = self.owner(territory)
+                    if ter_owner == attacker:
+                        return False
+        else: 
+            return False
+   
+        return True
+    
     def cost_of_attack_path(self, path):
         '''
         The cost of an attack path is the total number of enemy armies in the path.
@@ -143,7 +166,13 @@ class Board(object):
         Returns:
             bool: the number of enemy armies in the path
         '''
-
+        if self.is_valid_attack_path(path):
+            cost = 0
+            for territory in path[1:]:
+                cost += self.armies(territory)
+            return cost
+        else:
+            return None
 
     def shortest_path(self, source, target):
         '''
@@ -161,8 +190,23 @@ class Board(object):
         Returns:
             [int]: a valid path between source and target that has minimum length; this path is guaranteed to exist
         '''
+        pathdict = dict()
+        pathdict[source] = [source] 
+        q = deque()
+        q.append(source)
 
-
+        while len(q) > 0:
+            current_territory = q.popleft()
+            if current_territory == target:
+                return pathdict[current_territory]
+            neighbors = risk.definitions.territory_neighbors[current_territory]
+            for neighbor in neighbors:
+                if neighbor not in q:
+                    copcurrent = copy.copy(pathdict[current_territory])
+                    copcurrent.append(neighbor)
+                    pathdict[neighbor] = copcurrent
+                    q.append(neighbor)
+        
     def can_fortify(self, source, target):
         '''
         At the end of a turn, a player may choose to fortify a target territory by moving armies from a source territory.
@@ -176,7 +220,27 @@ class Board(object):
         Returns:
             bool: True if reinforcing the target from the source territory is a valid move
         '''
+        pathdict = dict()
+        pathdict[source] = [source] 
+        q = deque()
+        q.append(source)
+        visited = set()
+        visited.add(source)
 
+        while len(q) > 0:
+            current_territory = q.popleft()
+            if current_territory == target:
+                return True
+            neighbors = self.friendly_neighbors(current_territory)
+            for neighbor in neighbors:
+                if neighbor[0] not in visited:
+                    copcurrent = copy.copy(pathdict[current_territory])
+                    copcurrent.append(neighbor[0])
+                    pathdict[neighbor[0]] = copcurrent
+                    q.append(neighbor[0])
+                    visited.add(neighbor[0])
+        return False 
+        
 
     def cheapest_attack_path(self, source, target):
         '''
@@ -191,7 +255,39 @@ class Board(object):
         Returns:
             [int]: a list of territory_ids representing the valid attack path; if no path exists, then it returns None instead
         '''
+        if source == target:
+            return None 
 
+        attack_player_id = self.owner(source)
+        pathdict = dict()
+        pathdict[source] = [source] 
+        heap = heapdict.heapdict()
+        heap[source] = 0
+        visited = set()
+        visited.add(source)
+
+        while len(heap) > 0:
+            current_territory, current_priority  = heap.popitem()
+            if current_territory == target:
+                return pathdict[current_territory]
+            neighbors = []
+            allneighbs = self.neighbors(current_territory)
+            for neighb in allneighbs:
+                if not self.owner(neighb[0]) == attack_player_id:
+                    neighbors.append(neighb)
+            for neighbor in neighbors:
+                neighbor_id = neighbor[0]
+                if neighbor_id not in visited:
+                    copcurrent = copy.copy(pathdict[current_territory])
+                    copcurrent.append(neighbor_id)
+                    priority = current_priority + self.armies(neighbor_id)
+                    if neighbor_id not in heap:
+                        pathdict[neighbor_id] = copcurrent
+                        heap[neighbor_id] = priority
+                    elif priority < heap[neighbor_id]:
+                        pathdict[neighbor_id] = copcurrent
+                        heap[neighbor_id] = priority
+            visited.add(current_territory)
 
     def can_attack(self, source, target):
         '''
@@ -202,8 +298,11 @@ class Board(object):
         Returns:
             bool: True if a valid attack path exists between source and target; else False
         '''
-
-
+        cheapest_path = self.cheapest_attack_path(source, target)
+        if self.is_valid_attack_path(cheapest_path):
+            return True 
+        else:
+            return False 
     # ======================= #
     # == Continent Methods == #
     # ======================= #
